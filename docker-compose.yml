@@ -1,0 +1,52 @@
+services:
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: codegen-pgvector
+    environment:
+      POSTGRES_DB: ai_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: codegen-backend
+    depends_on:
+      - pgvector
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      PDF_DIR: /app/data/pdfs
+      TUTORIALS_DIR: /app/data/tutorials
+      DATABASE_URL: postgresql://postgres:postgres@pgvector:5432/ai_agent
+      VECTOR_TABLE_NAME: rag_chunks
+      EMBED_WORKERS: 4
+      INDEX_BATCH_SIZE: 24
+      CHUNK_SIZE: 900
+      CHUNK_OVERLAP: 120
+      TOP_K: 4
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: codegen-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pgvector_data:
