@@ -60,11 +60,39 @@ class RagStore:
         if not profile:
             return []
         if profile == "petex":
-            return ["%petex%", "%gap%", "%openserver%"]
+            return [
+                "tutorials/petex/%",
+                "tutorials/gap/%",
+                "%petex%",
+                "%gap%",
+                "%openserver%",
+            ]
         if profile == "tnav":
-            return ["%tnav%", "%tnavigator%", "%t_navigator%", "%t-nav%"]
+            return [
+                "tutorials/tnav/%",
+                "tutorials/tnavigator/%",
+                "%tnav%",
+                "%tnavigator%",
+                "%t_navigator%",
+                "%t-nav%",
+            ]
         if profile == "pi":
-            return ["%/pi/%", "%pi_client%", "%piwebapi%", "%osisoft%"]
+            return [
+                "tutorials/pi/%",
+                "tutorials/pi_client/%",
+                "%pi_client%",
+                "%piwebapi%",
+                "%osisoft%",
+                "%\\pi\\%",
+            ]
+        if profile == "workflows":
+            return [
+                "tutorials/workflows/%",
+                "%workflow%",
+                "%notebook%",
+                "%inputs%",
+                "%outputs%",
+            ]
         return []
 
     def _connect(self):

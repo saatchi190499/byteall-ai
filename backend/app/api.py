@@ -169,6 +169,8 @@ def _normalize_rag_profile(raw: str) -> str | None:
         return "tnav"
     if profile in {"pi", "pi-system", "pisystem"}:
         return "pi"
+    if profile in {"workflows", "workflow", "wf"}:
+        return "workflows"
     return None
 
 
