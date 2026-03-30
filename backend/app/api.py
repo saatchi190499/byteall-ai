@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api", tags=["agent"])
+logger = logging.getLogger(__name__)
+
+MAX_EDITOR_CONTEXT_CHARS = 12_000
+MAX_RAG_CONTEXT_CHARS = 18_000
 
 ollama = OllamaClient(
     base_url=settings.ollama_base_url,
@@ -129,8 +134,12 @@ def get_index_status(job_id: str) -> IndexStatusResponse:
 def chat(req: ChatRequest) -> ChatResponse:
     try:
         return build_chat_response(req)
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
+        detail = _format_chat_exception(exc)
+        status_code = 503 if _is_upstream_error(exc) else 500
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.websocket("/ws/chat")
@@ -145,7 +154,7 @@ async def ws_chat(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     except Exception as exc:
-        await websocket.send_json({"error": f"Chat failed: {exc}"})
+        await websocket.send_json({"error": _format_chat_exception(exc)})
         await websocket.close(code=1011)
 
 
@@ -241,20 +250,84 @@ def _cleanup_empty_parent_dirs(start_dir: Path, root: Path) -> None:
         current = current.parent
 
 
+def _truncate_for_prompt(text: str, max_chars: int, label: str) -> str:
+    if len(text) <= max_chars:
+        return text
+    omitted = len(text) - max_chars
+    return f"{text[:max_chars]}\n\n[{label} truncated: omitted {omitted} chars]"
+
+
+def _flatten_exception_messages(exc: Exception) -> list[str]:
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: Exception | None = exc
+
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        msg = str(current).strip()
+        if msg:
+            parts.append(msg)
+        current = current.__cause__ or current.__context__
+
+    return parts or ["Unknown error"]
+
+
+def _is_upstream_error(exc: Exception) -> bool:
+    text = " | ".join(_flatten_exception_messages(exc)).lower()
+    markers = [
+        "ollama",
+        "connection refused",
+        "connecterror",
+        "readtimeout",
+        "timed out",
+        "all connection attempts failed",
+        "psycopg",
+        "could not connect to server",
+        "database",
+    ]
+    return any(marker in text for marker in markers)
+
+
+def _format_chat_exception(exc: Exception) -> str:
+    parts = _flatten_exception_messages(exc)
+    joined = " | ".join(parts)
+    return f"Chat failed: {joined}"
+
+
 def build_chat_response(req: ChatRequest) -> ChatResponse:
     profile = _normalize_rag_profile(req.rag_profile)
-    hits = store.search(req.message, settings.top_k, profile=profile) if req.use_rag else []
+
+    hits = []
+    rag_notice = ""
+    if req.use_rag:
+        try:
+            hits = store.search(req.message, settings.top_k, profile=profile)
+        except Exception as rag_exc:
+            logger.exception("RAG search failed; continuing without RAG")
+            rag_notice = f"[System notice] RAG unavailable, answered without indexed context: {rag_exc}"
+            hits = []
+
     prompt = build_prompt(req, hits, profile)
     answer = ollama.chat(prompt)
-    return format_chat_response(answer, hits)
+    response = format_chat_response(answer, hits)
+
+    if rag_notice:
+        response.answer = f"{rag_notice}\n\n{response.answer}".strip()
+
+    return response
 
 
 def build_prompt(req: ChatRequest, hits, profile: str | None) -> str:
-    context = "\n\n".join(f"Source: {rec.source}\n{rec.text}" for rec, _score in hits)
+    raw_context = "\n\n".join(f"Source: {rec.source}\n{rec.text}" for rec, _score in hits)
+    context = _truncate_for_prompt(raw_context, MAX_RAG_CONTEXT_CHARS, "RAG context")
+
     rag_state = "enabled" if req.use_rag else "disabled"
     rag_profile = profile or "auto"
-    editor_code = req.editor_code.strip()
+
+    editor_code_raw = req.editor_code.strip()
+    editor_code = _truncate_for_prompt(editor_code_raw, MAX_EDITOR_CONTEXT_CHARS, "Editor code")
     editor_context = editor_code if editor_code else "No editor code provided."
+
     return (
         "User request:\n"
         f"{req.message}\n\n"
