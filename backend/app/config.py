@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_chat_model: str = "qwen3:8b"
     ollama_embedding_model: str = "nomic-embed-text"
+    ollama_timeout_seconds: float = 180.0
     pdf_dir: Path = Path("data/pdfs")
     tutorials_dir: Path = Path("data/tutorials")
     database_url: str = "postgresql://postgres:postgres@localhost:5432/ai_agent"

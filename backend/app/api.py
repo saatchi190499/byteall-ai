@@ -32,6 +32,7 @@ ollama = OllamaClient(
     base_url=settings.ollama_base_url,
     chat_model=settings.ollama_chat_model,
     embedding_model=settings.ollama_embedding_model,
+    timeout_seconds=settings.ollama_timeout_seconds,
 )
 store = RagStore(
     ollama,

@@ -4,11 +4,11 @@ import httpx
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, chat_model: str, embedding_model: str) -> None:
+    def __init__(self, base_url: str, chat_model: str, embedding_model: str, timeout_seconds: float = 120.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.chat_model = chat_model
         self.embedding_model = embedding_model
-        self.timeout = 120.0
+        self.timeout = max(float(timeout_seconds), 1.0)
 
     def embed(self, text: str) -> list[float]:
         payload = {"model": self.embedding_model, "prompt": text}
