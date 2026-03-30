@@ -192,9 +192,26 @@ async function safeFetch(path, options) {
 function normalizeHttpBase(base) {
   const trimmed = String(base || '').trim()
   if (!trimmed) return ''
-  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/+$/, '')
-  if (trimmed.startsWith('//')) return `${window.location.protocol}${trimmed}`.replace(/\/+$/, '')
-  return `http://${trimmed}`.replace(/\/+$/, '')
+
+  if (trimmed.startsWith('/')) {
+    return trimmed.replace(/\/+$/, '')
+  }
+
+  let resolved
+  if (/^https?:\/\//i.test(trimmed)) {
+    resolved = trimmed
+  } else if (trimmed.startsWith('//')) {
+    resolved = `${window.location.protocol}${trimmed}`
+  } else {
+    resolved = `${window.location.protocol}//${trimmed}`
+  }
+
+  if (window.location.protocol === 'https:' && /^http:\/\//i.test(resolved)) {
+    console.warn('Ignoring insecure API base on HTTPS page. Falling back to same-origin API path.')
+    return ''
+  }
+
+  return resolved.replace(/\/+$/, '')
 }
 
 function sendViaWebSocket(payload) {
@@ -276,3 +293,4 @@ async function waitForIndexJob(jobId) {
 
   throw new Error('Index job timeout')
 }
+

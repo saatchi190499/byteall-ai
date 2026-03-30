@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     use_rag: bool = True
+    rag_profile: str = "auto"
     editor_code: str = ""
 
 

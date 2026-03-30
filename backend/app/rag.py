@@ -55,6 +55,18 @@ class RagStore:
     def _file_key(source: str) -> str:
         return source.split("#", maxsplit=1)[0]
 
+    @staticmethod
+    def _profile_patterns(profile: str | None) -> list[str]:
+        if not profile:
+            return []
+        if profile == "petex":
+            return ["%petex%", "%gap%", "%openserver%"]
+        if profile == "tnav":
+            return ["%tnav%", "%tnavigator%", "%t_navigator%", "%t-nav%"]
+        if profile == "pi":
+            return ["%/pi/%", "%pi_client%", "%piwebapi%", "%osisoft%"]
+        return []
+
     def _connect(self):
         return psycopg.connect(self.database_url, autocommit=True)
 
@@ -170,26 +182,38 @@ class RagStore:
         cur.executemany(insert_stmt, rows)
         return len(rows)
 
-    def search(self, query: str, top_k: int) -> list[tuple[ChunkRecord, float]]:
+    def search(self, query: str, top_k: int, profile: str | None = None) -> list[tuple[ChunkRecord, float]]:
         if top_k <= 0:
             return []
 
         query_embedding = self.ollama.embed(query)
         query_vector = self._embedding_literal(query_embedding)
+        patterns = self._profile_patterns(profile)
+
+        where_clause = sql.SQL("")
+        params: list[object] = [query_vector]
+
+        if patterns:
+            like_clauses = [sql.SQL("source ILIKE %s") for _ in patterns]
+            where_clause = sql.SQL(" WHERE ") + sql.SQL(" OR ").join(like_clauses)
+            params.extend(patterns)
 
         stmt = sql.SQL(
             """
             SELECT source, content, GREATEST(0.0, 1.0 - (embedding <=> %s::vector)) AS score
             FROM {}
+            {}
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """
-        ).format(sql.Identifier(self.table_name))
+        ).format(sql.Identifier(self.table_name), where_clause)
+
+        params.extend([query_vector, top_k])
 
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(stmt, (query_vector, query_vector, top_k))
+                    cur.execute(stmt, params)
                     rows = cur.fetchall()
         except psycopg.errors.UndefinedTable:
             return []

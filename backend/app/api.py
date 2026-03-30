@@ -82,16 +82,31 @@ async def ws_chat(websocket: WebSocket) -> None:
         await websocket.close(code=1011)
 
 
+def _normalize_rag_profile(raw: str) -> str | None:
+    profile = str(raw or "").strip().lower()
+    if profile in {"", "auto", "all", "none"}:
+        return None
+    if profile in {"petex", "gap"}:
+        return "petex"
+    if profile in {"tnav", "tnavigator", "t_nav", "t-navigator"}:
+        return "tnav"
+    if profile in {"pi", "pi-system", "pisystem"}:
+        return "pi"
+    return None
+
+
 def build_chat_response(req: ChatRequest) -> ChatResponse:
-    hits = store.search(req.message, settings.top_k) if req.use_rag else []
-    prompt = build_prompt(req, hits)
+    profile = _normalize_rag_profile(req.rag_profile)
+    hits = store.search(req.message, settings.top_k, profile=profile) if req.use_rag else []
+    prompt = build_prompt(req, hits, profile)
     answer = ollama.chat(prompt)
     return format_chat_response(answer, hits)
 
 
-def build_prompt(req: ChatRequest, hits) -> str:
+def build_prompt(req: ChatRequest, hits, profile: str | None) -> str:
     context = "\n\n".join(f"Source: {rec.source}\n{rec.text}" for rec, _score in hits)
     rag_state = "enabled" if req.use_rag else "disabled"
+    rag_profile = profile or "auto"
     editor_code = req.editor_code.strip()
     editor_context = editor_code if editor_code else "No editor code provided."
     return (
@@ -100,7 +115,8 @@ def build_prompt(req: ChatRequest, hits) -> str:
         "Current notebook editor code:\n"
         f"{editor_context}\n\n"
         f"RAG mode: {rag_state}\n"
-        "Reference context from PDFs:\n"
+        f"RAG profile: {rag_profile}\n"
+        "Reference context from indexed docs:\n"
         f"{context if context else 'No context provided.'}\n\n"
         "If code is relevant, provide one markdown code block."
     )
