@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
-    ollama_chat_model: str = "qwen2.5-coder:3b"
+    ollama_chat_model: str = "qwen3:8b"
+    ollama_chat_fallback_models: str = "llama3.1:latest,qwen2.5-coder:3b"
     ollama_embedding_model: str = "nomic-embed-text"
     ollama_timeout_seconds: float = 180.0
 

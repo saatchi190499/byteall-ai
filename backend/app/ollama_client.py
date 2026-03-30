@@ -12,6 +12,7 @@ class OllamaClient:
         timeout_seconds: float = 120.0,
         chat_options: dict | None = None,
         keep_alive: str | None = None,
+        fallback_chat_models: list[str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.chat_model = chat_model
@@ -19,6 +20,15 @@ class OllamaClient:
         self.timeout = max(float(timeout_seconds), 1.0)
         self.chat_options = dict(chat_options or {})
         self.keep_alive = str(keep_alive or "").strip() or None
+
+        seen: set[str] = set()
+        self.fallback_chat_models: list[str] = []
+        for raw in fallback_chat_models or []:
+            model = str(raw or "").strip()
+            if not model or model == self.chat_model or model in seen:
+                continue
+            seen.add(model)
+            self.fallback_chat_models.append(model)
 
     def embed(self, text: str) -> list[float]:
         payload = {"model": self.embedding_model, "prompt": text}
@@ -28,8 +38,7 @@ class OllamaClient:
             return response.json()["embedding"]
 
     def chat(self, prompt: str) -> str:
-        payload = {
-            "model": self.chat_model,
+        base_payload = {
             "stream": False,
             "messages": [
                 {
@@ -43,14 +52,57 @@ class OllamaClient:
             ],
         }
         if self.chat_options:
-            payload["options"] = self.chat_options
+            base_payload["options"] = self.chat_options
         if self.keep_alive:
-            payload["keep_alive"] = self.keep_alive
+            base_payload["keep_alive"] = self.keep_alive
+
+        candidates = [self.chat_model, *self.fallback_chat_models]
 
         with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(f"{self.base_url}/api/chat", json=payload)
-            self._raise_with_ollama_error(response)
-            return response.json()["message"]["content"]
+            for model in candidates:
+                payload = dict(base_payload)
+                payload["model"] = model
+                response = client.post(f"{self.base_url}/api/chat", json=payload)
+
+                if response.is_success:
+                    return response.json()["message"]["content"]
+
+                if self._is_missing_model_response(response) or self._is_retryable_model_response(response):
+                    continue
+
+                self._raise_with_ollama_error(response)
+
+        tried = ", ".join(candidates)
+        raise RuntimeError(f"Ollama chat model not available. Tried: {tried}")
+
+    @staticmethod
+    def _is_missing_model_response(response: httpx.Response) -> bool:
+        if response.status_code not in {400, 404}:
+            return False
+
+        detail = (response.text or "").lower()
+        return (
+            ("model" in detail and "not found" in detail)
+            or "pull a model" in detail
+            or ("manifest" in detail and "not found" in detail)
+        )
+
+    @staticmethod
+    def _is_retryable_model_response(response: httpx.Response) -> bool:
+        if response.status_code < 500:
+            return False
+
+        detail = (response.text or "").lower()
+        markers = [
+            "runner process has terminated",
+            "out of memory",
+            "insufficient memory",
+            "model requires more system memory",
+            "cuda",
+            "metal",
+            "resource temporarily unavailable",
+        ]
+        return any(marker in detail for marker in markers)
 
     @staticmethod
     def _raise_with_ollama_error(response: httpx.Response) -> None:

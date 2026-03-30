@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 MAX_EDITOR_CONTEXT_CHARS = 12_000
 MAX_RAG_CONTEXT_CHARS = 18_000
 
+def _split_model_list(raw: str) -> list[str]:
+    seen: set[str] = set()
+    items: list[str] = []
+    for part in str(raw or '').split(','):
+        name = part.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        items.append(name)
+    return items
+
 _ollama_chat_options = {
     "num_ctx": settings.ollama_chat_num_ctx,
     "num_predict": settings.ollama_chat_num_predict,
@@ -40,6 +51,8 @@ if settings.ollama_chat_num_thread > 0:
 if settings.ollama_chat_num_gpu >= 0:
     _ollama_chat_options["num_gpu"] = settings.ollama_chat_num_gpu
 
+_ollama_fallback_models = _split_model_list(settings.ollama_chat_fallback_models)
+
 ollama = OllamaClient(
     base_url=settings.ollama_base_url,
     chat_model=settings.ollama_chat_model,
@@ -47,6 +60,7 @@ ollama = OllamaClient(
     timeout_seconds=settings.ollama_timeout_seconds,
     chat_options=_ollama_chat_options,
     keep_alive=settings.ollama_keep_alive,
+    fallback_chat_models=_ollama_fallback_models,
 )
 store = RagStore(
     ollama,
@@ -414,5 +428,6 @@ def _run_index() -> dict:
     files, chunks, skipped_files = store.build(settings.pdf_dir, settings.tutorials_dir)
     payload = IndexResponse(indexed_files=files, indexed_chunks=chunks, skipped_files=skipped_files)
     return payload.model_dump()
+
 
 
