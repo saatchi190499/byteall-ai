@@ -5,9 +5,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
-    ollama_chat_model: str = "qwen3:8b"
+    ollama_chat_model: str = "qwen2.5-coder:3b"
     ollama_embedding_model: str = "nomic-embed-text"
     ollama_timeout_seconds: float = 180.0
+
+    # Ollama generation tuning
+    ollama_keep_alive: str = "15m"
+    ollama_chat_num_ctx: int = 4096
+    ollama_chat_num_predict: int = 512
+    ollama_chat_temperature: float = 0.1
+    ollama_chat_top_p: float = 0.9
+    ollama_chat_repeat_penalty: float = 1.05
+    ollama_chat_num_thread: int = 0  # 0 => Ollama auto
+    ollama_chat_num_gpu: int = -1    # -1 => Ollama default behavior
+
+    # Backend request parallelism
+    uvicorn_workers: int = 2
+
     pdf_dir: Path = Path("data/pdfs")
     tutorials_dir: Path = Path("data/tutorials")
     database_url: str = "postgresql://postgres:postgres@localhost:5432/ai_agent"

@@ -4,11 +4,21 @@ import httpx
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, chat_model: str, embedding_model: str, timeout_seconds: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        chat_model: str,
+        embedding_model: str,
+        timeout_seconds: float = 120.0,
+        chat_options: dict | None = None,
+        keep_alive: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.chat_model = chat_model
         self.embedding_model = embedding_model
         self.timeout = max(float(timeout_seconds), 1.0)
+        self.chat_options = dict(chat_options or {})
+        self.keep_alive = str(keep_alive or "").strip() or None
 
     def embed(self, text: str) -> list[float]:
         payload = {"model": self.embedding_model, "prompt": text}
@@ -32,6 +42,11 @@ class OllamaClient:
                 {"role": "user", "content": prompt},
             ],
         }
+        if self.chat_options:
+            payload["options"] = self.chat_options
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
+
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(f"{self.base_url}/api/chat", json=payload)
             self._raise_with_ollama_error(response)

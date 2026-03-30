@@ -128,7 +128,11 @@ class RagStore:
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                try:
+                    cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                except psycopg.errors.UniqueViolation:
+                    # Can happen when multiple workers run startup schema checks concurrently.
+                    pass
                 cur.execute(
                     sql.SQL(
                         """
@@ -295,6 +299,7 @@ class RagStore:
 
         merged_hits = self._dedupe_hits(primary_hits + base_hits)
         return merged_hits[: top_k + base_limit]
+
 
 
 

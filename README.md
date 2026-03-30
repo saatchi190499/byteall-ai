@@ -1,4 +1,4 @@
-# AI Code Generation Agent
+﻿# AI Code Generation Agent
 
 Stack:
 - FastAPI backend
@@ -6,17 +6,23 @@ Stack:
 - RAG from local PDF + tutorial files + persistent PostgreSQL pgvector
 - React frontend (code panel left, chat right)
 
-## 1) Run Ollama On Host
+## 1) Run Ollama (Smaller Model + Parallelism + GPU)
 
-Start Ollama locally on your Mac:
+Recommended default model profile:
+- Chat model: `qwen2.5-coder:3b`
+- Embeddings: `nomic-embed-text`
+
+Host Ollama with parallel request tuning:
 
 ```bash
-ollama serve
-ollama pull qwen3:8b
+OLLAMA_NUM_PARALLEL=4 OLLAMA_MAX_LOADED_MODELS=2 OLLAMA_KEEP_ALIVE=15m ollama serve
+ollama pull qwen2.5-coder:3b
 ollama pull nomic-embed-text
 ```
 
-## 2) Run App With Docker
+If you run Ollama on GPU, make sure your Ollama runtime is using CUDA/Metal and drivers are installed.
+
+## 2) Run App With Docker (CPU-safe default)
 
 Put your documents into:
 - `data/pdfs/` for PDF manuals
@@ -33,23 +39,40 @@ docker compose up --build
 Services:
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8000`
-- Ollama API (host): `http://localhost:11434`
+- Ollama API (host by default): `http://localhost:11434`
 - PostgreSQL pgvector: `localhost:5432`
 
 Notes:
-- Backend container calls host Ollama via `http://host.docker.internal:11434`.
+- Backend container calls host Ollama via `http://host.docker.internal:11434` by default.
 - Vector index is stored in PostgreSQL pgvector and survives container restarts.
 - Indexing runs as a background job in backend.
-- You can override model names when starting compose:
+
+Recommended runtime overrides:
+
 ```bash
-OLLAMA_CHAT_MODEL=qwen3:8b OLLAMA_EMBEDDING_MODEL=nomic-embed-text docker compose up --build
-```
-- You can tune indexing speed:
-```bash
-EMBED_WORKERS=4 INDEX_BATCH_SIZE=24 docker compose up --build
+OLLAMA_CHAT_MODEL=qwen2.5-coder:3b \
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text \
+OLLAMA_CHAT_NUM_CTX=4096 \
+OLLAMA_CHAT_NUM_PREDICT=512 \
+UVICORN_WORKERS=2 \
+EMBED_WORKERS=4 \
+INDEX_BATCH_SIZE=24 \
+docker compose up --build
 ```
 
-## 3) Optional Local (Non-Docker) Run
+## 3) Optional: Enable GPU For Ollama Container
+
+Base compose runs Ollama in CPU-safe mode by default.
+
+To enable GPU, use override file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+If Docker reports no adapters/runtime for NVIDIA, stay on CPU mode and fix GPU runtime first.
+
+## 4) Optional Local (Non-Docker) Run
 
 If you want to run without Docker:
 
@@ -80,13 +103,14 @@ npm run dev
 ## Typical flow
 
 1. Start the stack (`docker compose up --build`) or run services locally.
-2. Click **Index PDFs** in UI (starts background indexing for `data/pdfs` and `data/tutorials`, rebuilding the pgvector table).
-3. Use the **Use RAG (PDF context)** toggle:
-   - ON: answers use indexed PDF chunks
-   - OFF: direct model response without PDF retrieval
+2. Run indexing for `data/pdfs` and `data/tutorials`.
+3. Use the **Use RAG** toggle:
+   - ON: answers use indexed context
+   - OFF: direct model response without retrieval
 4. Ask for code generation in chat.
 
 Indexing behavior:
 - Incremental by file hash: only new/changed files are re-embedded.
 - Removed files are deleted from the vector table.
 - `indexed_chunks` is the number of chunks processed in the latest run.
+

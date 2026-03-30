@@ -28,11 +28,25 @@ logger = logging.getLogger(__name__)
 MAX_EDITOR_CONTEXT_CHARS = 12_000
 MAX_RAG_CONTEXT_CHARS = 18_000
 
+_ollama_chat_options = {
+    "num_ctx": settings.ollama_chat_num_ctx,
+    "num_predict": settings.ollama_chat_num_predict,
+    "temperature": settings.ollama_chat_temperature,
+    "top_p": settings.ollama_chat_top_p,
+    "repeat_penalty": settings.ollama_chat_repeat_penalty,
+}
+if settings.ollama_chat_num_thread > 0:
+    _ollama_chat_options["num_thread"] = settings.ollama_chat_num_thread
+if settings.ollama_chat_num_gpu >= 0:
+    _ollama_chat_options["num_gpu"] = settings.ollama_chat_num_gpu
+
 ollama = OllamaClient(
     base_url=settings.ollama_base_url,
     chat_model=settings.ollama_chat_model,
     embedding_model=settings.ollama_embedding_model,
     timeout_seconds=settings.ollama_timeout_seconds,
+    chat_options=_ollama_chat_options,
+    keep_alive=settings.ollama_keep_alive,
 )
 store = RagStore(
     ollama,
@@ -400,4 +414,5 @@ def _run_index() -> dict:
     files, chunks, skipped_files = store.build(settings.pdf_dir, settings.tutorials_dir)
     payload = IndexResponse(indexed_files=files, indexed_chunks=chunks, skipped_files=skipped_files)
     return payload.model_dump()
+
 
