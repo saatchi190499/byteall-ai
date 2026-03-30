@@ -95,6 +95,30 @@ class RagStore:
             ]
         return []
 
+    @staticmethod
+    def _base_patterns() -> list[str]:
+        # Always include shared notebook syntax/tips guidance regardless of selected profile.
+        return [
+            "tutorials/workflows/notebook_syntax_rules.txt%",
+            "tutorials/workflows/notebook_tips_syntax.txt%",
+            "tutorials/workflows/%syntax%",
+            "tutorials/workflows/%tips%",
+            "%notebook_syntax_rules%",
+            "%notebook_tips_syntax%",
+        ]
+
+    @staticmethod
+    def _dedupe_hits(hits: list[tuple[ChunkRecord, float]]) -> list[tuple[ChunkRecord, float]]:
+        seen: set[tuple[str, str]] = set()
+        unique: list[tuple[ChunkRecord, float]] = []
+        for rec, score in hits:
+            key = (rec.source, rec.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append((rec, score))
+        return unique
+
     def _connect(self):
         return psycopg.connect(self.database_url, autocommit=True)
 
@@ -210,13 +234,14 @@ class RagStore:
         cur.executemany(insert_stmt, rows)
         return len(rows)
 
-    def search(self, query: str, top_k: int, profile: str | None = None) -> list[tuple[ChunkRecord, float]]:
+    def _search_by_patterns(
+        self,
+        query_vector: str,
+        top_k: int,
+        patterns: list[str] | None = None,
+    ) -> list[tuple[ChunkRecord, float]]:
         if top_k <= 0:
             return []
-
-        query_embedding = self.ollama.embed(query)
-        query_vector = self._embedding_literal(query_embedding)
-        patterns = self._profile_patterns(profile)
 
         where_clause = sql.SQL("")
         params: list[object] = [query_vector]
@@ -250,3 +275,21 @@ class RagStore:
         for source, content, score in rows:
             hits.append((ChunkRecord(source=source, text=content), float(score)))
         return hits
+
+    def search(self, query: str, top_k: int, profile: str | None = None) -> list[tuple[ChunkRecord, float]]:
+        if top_k <= 0:
+            return []
+
+        query_embedding = self.ollama.embed(query)
+        query_vector = self._embedding_literal(query_embedding)
+
+        profile_patterns = self._profile_patterns(profile) or None
+        base_patterns = self._base_patterns()
+
+        primary_hits = self._search_by_patterns(query_vector, top_k, patterns=profile_patterns)
+        base_limit = max(1, min(2, top_k))
+        base_hits = self._search_by_patterns(query_vector, base_limit, patterns=base_patterns)
+
+        merged_hits = self._dedupe_hits(primary_hits + base_hits)
+        return merged_hits[: top_k + base_limit]
+
