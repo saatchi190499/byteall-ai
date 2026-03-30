@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     chunk_size: int = 900
     chunk_overlap: int = 120
     top_k: int = 4
+    cors_allow_origins: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000,"
+        "https://btlweb"
+    )
+    cors_allow_origin_regex: str = ""
 
     model_config = SettingsConfigDict(
         env_file=("backend/.env", ".env"),
