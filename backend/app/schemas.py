@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -23,7 +25,7 @@ class ChatResponse(BaseModel):
 class IndexResponse(BaseModel):
     indexed_files: int
     indexed_chunks: int
-    skipped_files: list[str] = []
+    skipped_files: list[str] = Field(default_factory=list)
 
 
 class IndexStartResponse(BaseModel):
@@ -36,3 +38,29 @@ class IndexStatusResponse(BaseModel):
     status: str
     error: str | None = None
     result: IndexResponse | None = None
+
+
+class ManagedFile(BaseModel):
+    bucket: str
+    path: str
+    size: int
+    modified_at: datetime
+
+
+class FileListResponse(BaseModel):
+    files: list[ManagedFile] = Field(default_factory=list)
+
+
+class FileDeleteRequest(BaseModel):
+    bucket: str
+    path: str
+
+
+class FileUploadResponse(BaseModel):
+    message: str
+    file: ManagedFile
+
+
+class FileDeleteResponse(BaseModel):
+    message: str
+    file: ManagedFile

@@ -1,4 +1,7 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 
 from .config import settings
 from .indexing import indexing_manager
@@ -7,9 +10,14 @@ from .rag import RagStore
 from .schemas import (
     ChatRequest,
     ChatResponse,
+    FileDeleteRequest,
+    FileDeleteResponse,
+    FileListResponse,
+    FileUploadResponse,
     IndexResponse,
     IndexStartResponse,
     IndexStatusResponse,
+    ManagedFile,
     SourceChunk,
 )
 
@@ -34,6 +42,65 @@ store = RagStore(
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/files", response_model=FileListResponse)
+def list_index_files(bucket: str | None = None) -> FileListResponse:
+    requested_buckets = [_normalize_bucket(bucket)] if bucket else ["tutorials", "pdfs"]
+
+    files: list[ManagedFile] = []
+    for bucket_name in requested_buckets:
+        root = _resolve_bucket_dir(bucket_name)
+        files.extend(_scan_bucket_files(bucket_name, root))
+
+    files.sort(key=lambda item: (item.bucket, item.path.lower()))
+    return FileListResponse(files=files)
+
+
+@router.post("/files/upload", response_model=FileUploadResponse)
+async def upload_index_file(
+    upload: UploadFile = File(...),
+    bucket: str = Form("tutorials"),
+    relative_dir: str = Form(""),
+) -> FileUploadResponse:
+    bucket_name = _normalize_bucket(bucket)
+    root = _resolve_bucket_dir(bucket_name)
+
+    filename = Path(str(upload.filename or "")).name.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="File name is required")
+
+    if bucket_name == "pdfs" and Path(filename).suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="Only .pdf files are allowed in pdfs bucket")
+
+    rel_dir_path = _safe_relative_path(relative_dir, allow_empty=True)
+    rel_file_path = (rel_dir_path / filename) if rel_dir_path != Path(".") else Path(filename)
+    target_path = _resolve_under_root(root, rel_file_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = await upload.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    target_path.write_bytes(content)
+    managed = _to_managed_file(bucket_name, root, target_path)
+    return FileUploadResponse(message="uploaded", file=managed)
+
+
+@router.delete("/files", response_model=FileDeleteResponse)
+def delete_index_file(req: FileDeleteRequest) -> FileDeleteResponse:
+    bucket_name = _normalize_bucket(req.bucket)
+    root = _resolve_bucket_dir(bucket_name)
+    rel_file_path = _safe_relative_path(req.path, allow_empty=False)
+    target_path = _resolve_under_root(root, rel_file_path)
+
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    managed = _to_managed_file(bucket_name, root, target_path)
+    target_path.unlink()
+    _cleanup_empty_parent_dirs(target_path.parent, root)
+    return FileDeleteResponse(message="deleted", file=managed)
 
 
 @router.post("/index", response_model=IndexStartResponse)
@@ -93,6 +160,85 @@ def _normalize_rag_profile(raw: str) -> str | None:
     if profile in {"pi", "pi-system", "pisystem"}:
         return "pi"
     return None
+
+
+def _normalize_bucket(bucket: str | None) -> str:
+    normalized = str(bucket or "").strip().lower()
+    if normalized in {"tutorials", "tutorial", "docs", "doc"}:
+        return "tutorials"
+    if normalized in {"pdfs", "pdf"}:
+        return "pdfs"
+    raise HTTPException(status_code=400, detail="Invalid bucket. Use 'tutorials' or 'pdfs'.")
+
+
+def _resolve_bucket_dir(bucket: str) -> Path:
+    if bucket == "tutorials":
+        root = settings.tutorials_dir
+    elif bucket == "pdfs":
+        root = settings.pdf_dir
+    else:
+        raise HTTPException(status_code=400, detail="Invalid bucket")
+
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def _safe_relative_path(path: str, allow_empty: bool) -> Path:
+    raw = str(path or "").replace("\\", "/").strip().lstrip("/")
+    if not raw:
+        if allow_empty:
+            return Path(".")
+        raise HTTPException(status_code=400, detail="Path is required")
+
+    candidate = Path(raw)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if any(":" in part for part in candidate.parts):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    return candidate
+
+
+def _resolve_under_root(root: Path, relative_path: Path) -> Path:
+    target = (root / relative_path).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=400, detail="Path traversal is not allowed")
+    return target
+
+
+def _to_managed_file(bucket: str, root: Path, file_path: Path) -> ManagedFile:
+    stat = file_path.stat()
+    return ManagedFile(
+        bucket=bucket,
+        path=file_path.relative_to(root).as_posix(),
+        size=stat.st_size,
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+    )
+
+
+def _scan_bucket_files(bucket: str, root: Path) -> list[ManagedFile]:
+    files: list[ManagedFile] = []
+    if not root.exists():
+        return files
+
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            files.append(_to_managed_file(bucket, root, path))
+    return files
+
+
+def _cleanup_empty_parent_dirs(start_dir: Path, root: Path) -> None:
+    current = start_dir
+    while current != root:
+        if not current.exists():
+            current = current.parent
+            continue
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 def build_chat_response(req: ChatRequest) -> ChatResponse:
