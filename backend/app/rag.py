@@ -63,9 +63,14 @@ class RagStore:
             return [
                 "tutorials/petex/%",
                 "tutorials/gap/%",
+                "tutorials/workflows/notebook_syntax_rules.txt%",
+                "tutorials/workflows/notebook_global_rules.txt%",
                 "%petex%",
                 "%gap%",
                 "%openserver%",
+                "%inputs%",
+                "%outputs%",
+                "%notebook%",
             ]
         if profile == "tnav":
             return [
@@ -97,14 +102,12 @@ class RagStore:
 
     @staticmethod
     def _base_patterns() -> list[str]:
-        # Always include shared notebook syntax/tips guidance regardless of selected profile.
+        # Always include only global, profile-agnostic notebook rules.
         return [
             "tutorials/workflows/notebook_syntax_rules.txt%",
-            "tutorials/workflows/notebook_tips_syntax.txt%",
-            "tutorials/workflows/%syntax%",
-            "tutorials/workflows/%tips%",
+            "tutorials/workflows/notebook_global_rules.txt%",
             "%notebook_syntax_rules%",
-            "%notebook_tips_syntax%",
+            "%notebook_global_rules%",
         ]
 
     @staticmethod
@@ -292,4 +295,6 @@ class RagStore:
 
         merged_hits = self._dedupe_hits(primary_hits + base_hits)
         return merged_hits[: top_k + base_limit]
+
+
 

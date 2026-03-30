@@ -320,12 +320,54 @@ def build_chat_response(req: ChatRequest) -> ChatResponse:
     return response
 
 
+def _profile_generation_rules(profile: str | None) -> str:
+    if profile == "petex":
+        return (
+            "Generation rules for selected RAG profile (petex):\n"
+            "- Combine workflow table syntax with PETEX/GAP functions.\n"
+            "- Allowed modules: gap, gaptools, and notebook workflow tables (<Type>InputsTable / <Type>OutputsTable).\n"
+            "- Do not use PI functions.\n"
+            "- For executable Python, use real wrapper names/signatures (snake_case) from context.\n"
+            "- For notebook requests, read values from InputsTable and write results to OutputsTable.\n"
+            "- If profile functions are missing in context, say it explicitly and ask for index update."
+        )
+    if profile == "pi":
+        return (
+            "Generation rules for selected RAG profile (pi):\n"
+            "- Use only PI profile functions from retrieved context.\n"
+            "- Allowed module: pi (or underlying helpers).\n"
+            "- Do not use gap/gaptools functions.\n"
+            "- If PI profile functions are missing in context, say it explicitly and ask for index update."
+        )
+    if profile == "tnav":
+        return (
+            "Generation rules for selected RAG profile (tnav):\n"
+            "- Use only tNavigator profile functions from retrieved context.\n"
+            "- Do not use gap/gaptools/pi functions unless user explicitly asks to mix profiles.\n"
+            "- If tNavigator functions are missing in context, say it explicitly and ask for index update."
+        )
+    if profile == "workflows":
+        return (
+            "Generation rules for selected RAG profile (workflows):\n"
+            "- Use notebook workflow table syntax only.\n"
+            "- Do not use gap/gaptools/pi functions unless user explicitly asks to mix profiles."
+        )
+    return (
+        "Generation rules for selected RAG profile (auto):\n"
+        "- Choose one profile domain that matches the user request and keep code in that domain.\n"
+        "- For notebook + Petex requests, combine workflow table syntax with gap/gaptools.\n"
+        "- Do not mix gap/gaptools/pi in one snippet unless user explicitly asks to combine them.\n"
+        "- Use only function names found in retrieved context."
+    )
+
+
 def build_prompt(req: ChatRequest, hits, profile: str | None) -> str:
     raw_context = "\n\n".join(f"Source: {rec.source}\n{rec.text}" for rec, _score in hits)
     context = _truncate_for_prompt(raw_context, MAX_RAG_CONTEXT_CHARS, "RAG context")
 
     rag_state = "enabled" if req.use_rag else "disabled"
     rag_profile = profile or "auto"
+    profile_rules = _profile_generation_rules(profile)
 
     editor_code_raw = req.editor_code.strip()
     editor_code = _truncate_for_prompt(editor_code_raw, MAX_EDITOR_CONTEXT_CHARS, "Editor code")
@@ -338,11 +380,11 @@ def build_prompt(req: ChatRequest, hits, profile: str | None) -> str:
         f"{editor_context}\n\n"
         f"RAG mode: {rag_state}\n"
         f"RAG profile: {rag_profile}\n"
+        f"{profile_rules}\n\n"
         "Reference context from indexed docs:\n"
         f"{context if context else 'No context provided.'}\n\n"
         "If code is relevant, provide one markdown code block."
     )
-
 
 def format_chat_response(answer: str, hits) -> ChatResponse:
     code = extract_code(answer)
@@ -358,3 +400,4 @@ def _run_index() -> dict:
     files, chunks, skipped_files = store.build(settings.pdf_dir, settings.tutorials_dir)
     payload = IndexResponse(indexed_files=files, indexed_chunks=chunks, skipped_files=skipped_files)
     return payload.model_dump()
+
